@@ -4,7 +4,7 @@ const SUPABASE_KEY = 'sb_publishable_qNcUyFxMlWAWAry3uSHndg_ADVMCE3a';
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// DOM елементи
+// DOM елементи (залишаються без змін від попередньої версії)
 const appContent = document.getElementById('app-content');
 const authButton = document.getElementById('authButton');
 const logoutButton = document.getElementById('logoutButton');
@@ -13,7 +13,6 @@ const closeAuthModal = authModal.querySelector('.close-button');
 const authEmail = document.getElementById('authEmail');
 const authPassword = document.getElementById('authPassword');
 const signInButton = document.getElementById('signInButton');
-// const signUpButton = document.getElementById('signUpButton'); // Видаляємо
 const authMessage = document.getElementById('authMessage');
 
 const totalIncomeSpan = document.getElementById('totalIncome');
@@ -50,9 +49,9 @@ const addTransactionButton = document.getElementById('addTransactionButton');
 
 // Глобальні змінні
 let currentUserId = null;
-let currentUserName = "Ви"; // Для відображення "Ви" замість "Мій друг"
+let userProfilesCache = []; // Кеш для профілів користувачів
 
-// --- Функції авторизації ---
+// --- Функції авторизації (залишаються без змін) ---
 async function handleAuthStateChange(event, session) {
     if (session) {
         currentUserId = session.user.id;
@@ -61,8 +60,8 @@ async function handleAuthStateChange(event, session) {
         authButton.style.display = 'none';
         logoutButton.style.display = 'block';
         authModal.style.display = 'none';
+        await createUserProfileIfNotExists(session.user); // Створити профіль, якщо його немає
         await loadAllData(); // Завантажуємо всі дані після входу
-        await createUserProfileIfNotExists(session.user);
     } else {
         currentUserId = null;
         console.log('User logged out');
@@ -85,23 +84,6 @@ async function signIn() {
     }
 }
 
-// Видаляємо функцію signUp(), оскільки вона більше не потрібна
-/*
-async function signUp() {
-    const email = authEmail.value;
-    const password = authPassword.value;
-    const { error, data } = await sb.auth.signUp({ email, password });
-    if (error) {
-        authMessage.textContent = error.message;
-    } else {
-        authMessage.textContent = 'Перевірте свою пошту для підтвердження.';
-        console.log('Sign up successful, user:', data.user);
-        authEmail.value = '';
-        authPassword.value = '';
-    }
-}
-*/
-
 async function signOut() {
     const { error } = await sb.auth.signOut();
     if (error) {
@@ -121,7 +103,6 @@ async function createUserProfileIfNotExists(user) {
     }
 
     if (data && data.length === 0) {
-        // Профіль не існує, створюємо
         const { error: insertError } = await sb
             .from('user_profiles')
             .insert([
@@ -140,6 +121,7 @@ async function createUserProfileIfNotExists(user) {
 
 async function loadAllData() {
     if (!currentUserId) return;
+    userProfilesCache = await fetchUserProfiles(); // Оновлюємо кеш профілів
     await updateOverviewTotals();
     await displayUserSplit();
     await loadDailyChartData();
@@ -147,12 +129,13 @@ async function loadAllData() {
     await loadTasks();
     await loadTransactions();
 
-    // Встановлюємо сьогоднішню дату для нового запису транзакції
     newTransactionDate.valueAsDate = new Date();
 }
 
 // Завантаження профілів користувачів (для відображення імен)
 async function fetchUserProfiles() {
+    // Змінено: тепер ми хочемо бачити профілі всіх користувачів, які є друзями
+    // або свій власний. RLS-політики це дозволять.
     const { data, error } = await sb.from('user_profiles').select('*');
     if (error) {
         console.error('Error fetching user profiles:', error.message);
@@ -161,37 +144,38 @@ async function fetchUserProfiles() {
     return data;
 }
 
-async function getDisplayName(userId) {
-    const profiles = await fetchUserProfiles();
-    const profile = profiles.find(p => p.id === userId);
+// Функція для отримання відображуваного імені користувача за ID
+function getDisplayName(userId) {
+    const profile = userProfilesCache.find(p => p.id === userId);
     if (profile) {
         return profile.display_name;
     }
-    return userId === currentUserId ? "Я (Ви)" : "Інший користувач"; // Fallback
+    return userId === currentUserId ? "Я (Ви)" : "Невідомий користувач"; // Fallback
 }
 
 
-// Оновлення загальних показників
+// Оновлення загальних показників (Сума транзакцій поточного користувача + транзакції друзів)
 async function updateOverviewTotals() {
-    const { data: incomeData, error: incomeError } = await sb
+    const { data: transactions, error } = await sb
         .from('transactions')
-        .select('amount')
-        .eq('type', 'income')
-        .eq('user_id', currentUserId); // Тільки для поточного користувача
+        .select('amount, type'); // Завдяки RLS, цей запит поверне транзакції поточного користувача та його друзів
 
-    const { data: expenseData, error: expenseError } = await sb
-        .from('transactions')
-        .select('amount')
-        .eq('type', 'expense')
-        .eq('user_id', currentUserId);
-
-    if (incomeError || expenseError) {
-        console.error('Error fetching totals:', incomeError || expenseError);
+    if (error) {
+        console.error('Error fetching totals for overview:', error.message);
         return;
     }
 
-    const totalIncome = incomeData.reduce((sum, item) => sum + item.amount, 0);
-    const totalExpense = expenseData.reduce((sum, item) => sum + item.amount, 0);
+    let totalIncome = 0;
+    let totalExpense = 0;
+
+    transactions.forEach(item => {
+        if (item.type === 'income') {
+            totalIncome += item.amount;
+        } else {
+            totalExpense += item.amount;
+        }
+    });
+
     const totalBalance = totalIncome - totalExpense;
 
     totalIncomeSpan.textContent = `${totalIncome.toFixed(2)}₴`;
@@ -204,16 +188,11 @@ async function updateOverviewTotals() {
 // Відображення розподілу за користувачами
 async function displayUserSplit(period = 'all') {
     userSplitContainer.innerHTML = '';
-    const profiles = await fetchUserProfiles(); // Отримаємо всі профілі
-
-    // Отримаємо всі транзакції, якщо це адмін чи потрібно бачити транзакції друзів
-    // Для початку MVP - кожен бачить тільки свої транзакції.
-    // Якщо ви хочете спільний бюджет, RLS політики треба змінити, щоб дозволити бачити транзакції друзів
-    // і тоді тут треба fetch всіх транзакцій групи.
-    // Наразі fetch тільки для поточного користувача.
+    
+    // Завдяки RLS, цей запит поверне транзакції поточного користувача та його друзів
     const { data: transactions, error } = await sb
         .from('transactions')
-        .select('*'); // Цей запит поверне тільки транзакції поточного користувача через RLS
+        .select('amount, type, user_id, transaction_date');
 
     if (error) {
         console.error('Error fetching transactions for user split:', error.message);
@@ -221,7 +200,8 @@ async function displayUserSplit(period = 'all') {
     }
 
     const userStats = {};
-    profiles.forEach(profile => {
+    // Ініціалізуємо статистику для всіх, кого ми можемо бачити (поточний користувач + друзі)
+    userProfilesCache.forEach(profile => {
         userStats[profile.id] = {
             displayName: profile.display_name,
             avatarUrl: profile.avatar_url,
@@ -231,8 +211,13 @@ async function displayUserSplit(period = 'all') {
         };
     });
 
-    transactions.forEach(t => {
-        if (userStats[t.user_id]) {
+    // Фільтруємо транзакції за періодом, якщо потрібно
+    let filteredTransactions = transactions;
+    // Логіка фільтрації за періодом (тиждень, місяць) тут буде більш складною
+    // Для простоти, поки що "all" або можна додати реальну фільтрацію
+
+    filteredTransactions.forEach(t => {
+        if (userStats[t.user_id]) { // Перевіряємо, чи є цей user_id серед профілів, які ми можемо бачити
             if (t.type === 'income') {
                 userStats[t.user_id].income += t.amount;
             } else {
@@ -258,7 +243,7 @@ async function displayUserSplit(period = 'all') {
 }
 
 
-// Завантаження даних для денного графіка
+// Завантаження даних для денного графіка (для поточного користувача та друзів)
 async function loadDailyChartData() {
     const days = parseInt(graphPeriodSelect.value);
     const endDate = new Date();
@@ -304,10 +289,10 @@ async function loadDailyChartData() {
 }
 
 
-// Рендеринг денного графіка
+// Рендеринг денного графіка (без змін)
 function renderDailyChart(labels, incomes, expenses) {
     if (dailyChartInstance) {
-        dailyChartInstance.destroy(); // Знищуємо попередній екземпляр
+        dailyChartInstance.destroy();
     }
 
     const ctx = dailyChartCanvas.getContext('2d');
@@ -381,13 +366,12 @@ function renderDailyChart(labels, incomes, expenses) {
 }
 
 
-// Завантаження нотаток
+// Завантаження нотаток (тепер також бачить нотатки друзів)
 async function loadNotes() {
     notesList.innerHTML = '';
     const { data, error } = await sb
         .from('notes')
-        .select('*')
-        .eq('user_id', currentUserId)
+        .select('*') // RLS дозволить побачити нотатки друзів
         .order('created_at', { ascending: false });
 
     if (error) {
@@ -402,15 +386,15 @@ async function loadNotes() {
         li.innerHTML = `
             <span>${note.content}</span>
             <div class="actions">
-                <input type="checkbox" ${note.is_completed ? 'checked' : ''} onchange="toggleNoteCompletion('${note.id}', this.checked)">
-                <button class="btn-icon" onclick="deleteNote('${note.id}')"><img src="https://api.iconify.design/ic:round-delete.svg?color=%23e0e0e0" alt="Видалити"></button>
+                <input type="checkbox" ${note.is_completed ? 'checked' : ''} onchange="toggleNoteCompletion('${note.id}', this.checked, '${note.user_id}')">
+                <button class="btn-icon" onclick="deleteNote('${note.id}', '${note.user_id}')"><img src="https://api.iconify.design/ic:round-delete.svg?color=%23e0e0e0" alt="Видалити"></button>
             </div>
         `;
         notesList.appendChild(li);
     });
 }
 
-// Додавання нотатки
+// Додавання нотатки (без змін)
 async function addNote() {
     const content = newNoteInput.value.trim();
     if (!content || !currentUserId) return;
@@ -427,13 +411,17 @@ async function addNote() {
     }
 }
 
-// Зміна статусу нотатки
-async function toggleNoteCompletion(noteId, isCompleted) {
+// Зміна статусу нотатки (тепер перевіряє, чи ви власник або друг, щоб дозволити зміну)
+async function toggleNoteCompletion(noteId, isCompleted, ownerUserId) {
+    if (ownerUserId !== currentUserId) {
+        alert('Ви можете змінювати статус лише своїх нотаток.'); // Або дозволити, якщо це спільний простір
+        return;
+    }
     const { error } = await sb
         .from('notes')
         .update({ is_completed: isCompleted })
         .eq('id', noteId)
-        .eq('user_id', currentUserId); // Перевірка user_id для RLS
+        .eq('user_id', currentUserId); // RLS перевірить власника
 
     if (error) {
         console.error('Error updating note:', error.message);
@@ -442,13 +430,19 @@ async function toggleNoteCompletion(noteId, isCompleted) {
     }
 }
 
-// Видалення нотатки
-async function deleteNote(noteId) {
+// Видалення нотатки (тепер перевіряє, чи ви власник)
+async function deleteNote(noteId, ownerUserId) {
+    if (ownerUserId !== currentUserId) {
+        alert('Ви можете видаляти лише свої нотатки.');
+        return;
+    }
+    if (!confirm('Ви впевнені, що хочете видалити цю нотатку?')) return;
+
     const { error } = await sb
         .from('notes')
         .delete()
         .eq('id', noteId)
-        .eq('user_id', currentUserId); // Перевірка user_id для RLS
+        .eq('user_id', currentUserId); // RLS перевірить власника
 
     if (error) {
         console.error('Error deleting note:', error.message);
@@ -458,13 +452,12 @@ async function deleteNote(noteId) {
 }
 
 
-// Завантаження завдань
+// Завантаження завдань (тепер також бачить завдання друзів)
 async function loadTasks() {
     tasksList.innerHTML = '';
     const { data, error } = await sb
         .from('tasks')
-        .select('*')
-        .eq('user_id', currentUserId)
+        .select('*') // RLS дозволить побачити завдання друзів
         .order('created_at', { ascending: false });
 
     if (error) {
@@ -477,17 +470,17 @@ async function loadTasks() {
         li.dataset.id = task.id;
         li.className = task.is_completed ? 'completed' : '';
         li.innerHTML = `
-            <span>${task.description}</span>
+            <span>${task.description} (${getDisplayName(task.user_id)})</span>
             <div class="actions">
-                <input type="checkbox" ${task.is_completed ? 'checked' : ''} onchange="toggleTaskCompletion('${task.id}', this.checked)">
-                <button class="btn-icon" onclick="deleteTask('${task.id}')"><img src="https://api.iconify.design/ic:round-delete.svg?color=%23e0e0e0" alt="Видалити"></button>
+                <input type="checkbox" ${task.is_completed ? 'checked' : ''} onchange="toggleTaskCompletion('${task.id}', this.checked, '${task.user_id}')">
+                <button class="btn-icon" onclick="deleteTask('${task.id}', '${task.user_id}')"><img src="https://api.iconify.design/ic:round-delete.svg?color=%23e0e0e0" alt="Видалити"></button>
             </div>
         `;
         tasksList.appendChild(li);
     });
 }
 
-// Додавання завдання
+// Додавання завдання (без змін)
 async function addTask() {
     const description = newTaskInput.value.trim();
     if (!description || !currentUserId) return;
@@ -504,13 +497,17 @@ async function addTask() {
     }
 }
 
-// Зміна статусу завдання
-async function toggleTaskCompletion(taskId, isCompleted) {
+// Зміна статусу завдання (перевіряє, чи ви власник)
+async function toggleTaskCompletion(taskId, isCompleted, ownerUserId) {
+    if (ownerUserId !== currentUserId) {
+        alert('Ви можете змінювати статус лише своїх завдань.');
+        return;
+    }
     const { error } = await sb
         .from('tasks')
         .update({ is_completed: isCompleted })
         .eq('id', taskId)
-        .eq('user_id', currentUserId);
+        .eq('user_id', currentUserId); // RLS перевірить власника
 
     if (error) {
         console.error('Error updating task:', error.message);
@@ -519,13 +516,19 @@ async function toggleTaskCompletion(taskId, isCompleted) {
     }
 }
 
-// Видалення завдання
-async function deleteTask(taskId) {
+// Видалення завдання (перевіряє, чи ви власник)
+async function deleteTask(taskId, ownerUserId) {
+    if (ownerUserId !== currentUserId) {
+        alert('Ви можете видаляти лише свої завдання.');
+        return;
+    }
+    if (!confirm('Ви впевнені, що хочете видалити це завдання?')) return;
+
     const { error } = await sb
         .from('tasks')
         .delete()
         .eq('id', taskId)
-        .eq('user_id', currentUserId);
+        .eq('user_id', currentUserId); // RLS перевірить власника
 
     if (error) {
         console.error('Error deleting task:', error.message);
@@ -535,10 +538,10 @@ async function deleteTask(taskId) {
 }
 
 
-// Завантаження та відображення транзакцій
+// Завантаження та відображення транзакцій (тепер також бачить транзакції друзів)
 async function loadTransactions() {
     transactionsTableBody.innerHTML = '';
-    let query = sb.from('transactions').select('*');
+    let query = sb.from('transactions').select('*'); // RLS дозволить побачити транзакції друзів
 
     // Фільтри
     const start = filterStartDate.value;
@@ -550,9 +553,7 @@ async function loadTransactions() {
     if (start) query = query.gte('transaction_date', start);
     if (end) query = query.lte('transaction_date', end);
     if (type) query = query.eq('type', type);
-    if (category) query = query.ilike('category', `%${category}%`); // Case-insensitive LIKE
-
-    // Запит буде автоматично фільтрувати по user_id завдяки RLS
+    if (category) query = query.ilike('category', `%${category}%`);
 
     const { data: transactions, error } = await query.order('transaction_date', { ascending: false });
 
@@ -561,17 +562,13 @@ async function loadTransactions() {
         return;
     }
 
-    const profiles = await fetchUserProfiles(); // Для відображення імен користувачів
-    const userMap = new Map(profiles.map(p => [p.id, p.display_name]));
-
     transactions.forEach(t => {
-        // Пошук за описом або категорією
         if (search && !(t.description && t.description.toLowerCase().includes(search)) && !(t.category && t.category.toLowerCase().includes(search))) {
-            return; // Пропускаємо, якщо не відповідає пошуку
+            return;
         }
 
         const tr = document.createElement('tr');
-        const userName = userMap.get(t.user_id) || "Невідомий";
+        const userName = getDisplayName(t.user_id);
         tr.innerHTML = `
             <td>${t.transaction_date}</td>
             <td class="${t.type === 'income' ? 'income-text' : 'expense-text'}">${t.type === 'income' ? 'Дохід' : 'Витрата'}</td>
@@ -580,5 +577,138 @@ async function loadTransactions() {
             <td class="${t.type === 'income' ? 'income-text' : 'expense-text'}">${t.amount.toFixed(2)}₴</td>
             <td>${userName}</td>
             <td>
-                <button class="btn-icon" onclick="editTransaction('${t.id}')"><img src="https://api.iconify.design/ic:round-edit.svg?color=%23e0e0e0" alt="Редагувати"></button>
-                <button class="btn-icon" onclic
+                <button class="btn-icon" onclick="editTransaction('${t.id}', '${t.user_id}')"><img src="https://api.iconify.design/ic:round-edit.svg?color=%23e0e0e0" alt="Редагувати"></button>
+                <button class="btn-icon" onclick="deleteTransaction('${t.id}', '${t.user_id}')"><img src="https://api.iconify.design/ic:round-delete.svg?color=%23e0e0e0" alt="Видалити"></button>
+            </td>
+        `;
+        transactionsTableBody.appendChild(tr);
+    });
+}
+
+// Додавання транзакції (без змін)
+async function addTransaction() {
+    const amount = parseFloat(newTransactionAmount.value);
+    const type = newTransactionType.value;
+    const category = newTransactionCategory.value.trim();
+    const description = newTransactionDescription.value.trim();
+    const transaction_date = newTransactionDate.value;
+
+    if (isNaN(amount) || amount <= 0 || !type || !category || !transaction_date || !currentUserId) {
+        alert('Будь ласка, заповніть всі обов\'язкові поля для транзакції (сума, тип, категорія, дата).');
+        return;
+    }
+
+    const { error } = await sb
+        .from('transactions')
+        .insert([{
+            user_id: currentUserId,
+            amount,
+            type,
+            category,
+            description,
+            transaction_date
+        }]);
+
+    if (error) {
+        console.error('Error adding transaction:', error.message);
+    } else {
+        newTransactionAmount.value = '';
+        newTransactionCategory.value = '';
+        newTransactionDescription.value = '';
+        newTransactionDate.valueAsDate = new Date();
+        await loadAllData();
+    }
+}
+
+// Редагування транзакції (тепер перевіряє, чи ви власник)
+async function editTransaction(transactionId, ownerUserId) {
+    if (ownerUserId !== currentUserId) {
+        alert('Ви можете редагувати лише свої транзакції.');
+        return;
+    }
+    alert(`Редагувати транзакцію з ID: ${transactionId} - ця функція потребує реалізації модального вікна.`);
+}
+
+// Видалення транзакції (тепер перевіряє, чи ви власник)
+async function deleteTransaction(transactionId, ownerUserId) {
+    if (ownerUserId !== currentUserId) {
+        alert('Ви можете видаляти лише свої транзакції.');
+        return;
+    }
+    if (!confirm('Ви впевнені, що хочете видалити цю транзакцію?')) return;
+
+    const { error } = await sb
+        .from('transactions')
+        .delete()
+        .eq('id', transactionId)
+        .eq('user_id', currentUserId); // RLS перевірить власника
+
+    if (error) {
+        console.error('Error deleting transaction:', error.message);
+    } else {
+        await loadAllData();
+    }
+}
+
+// --- Функції для керування друзями (Placeholder) ---
+// Ці функції потрібно буде реалізувати на сторінці "Налаштування" або окремому вікні
+// для відправки та прийняття запитів на дружбу.
+async function sendFriendRequest(targetEmail) {
+    alert(`Надіслати запит на дружбу користувачу: ${targetEmail}`);
+    // 1. Знайти user_id за targetEmail (з user_profiles)
+    // 2. Створити запис у таблиці 'friendships' зі статусом 'pending'
+}
+
+async function acceptFriendRequest(friendshipId) {
+    alert(`Прийняти запит на дружбу з ID: ${friendshipId}`);
+    // Оновити статус у таблиці 'friendships' на 'accepted'
+}
+
+
+// --- Слухачі подій (без змін, окрім експорту функцій з ownerUserId) ---
+document.addEventListener('DOMContentLoaded', async () => {
+    const { data: { session } } = await sb.auth.getSession();
+    handleAuthStateChange(null, session);
+    sb.auth.onAuthStateChange(handleAuthStateChange);
+
+    const today = new Date().toISOString().split('T')[0];
+    filterEndDate.value = today;
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
+    filterStartDate.value = thirtyDaysAgo.toISOString().split('T')[0];
+});
+
+authButton.addEventListener('click', () => {
+    authModal.style.display = 'flex';
+    authMessage.textContent = '';
+});
+closeAuthModal.addEventListener('click', () => authModal.style.display = 'none');
+window.addEventListener('click', (event) => {
+    if (event.target == authModal) {
+        authModal.style.display = 'none';
+    }
+});
+
+signInButton.addEventListener('click', signIn);
+logoutButton.addEventListener('click', signOut);
+
+addNoteButton.addEventListener('click', addNote);
+newNoteInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addNote(); });
+
+addTaskButton.addEventListener('click', addTask);
+newTaskInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addTask(); });
+
+graphPeriodSelect.addEventListener('change', loadDailyChartData);
+
+applyFiltersButton.addEventListener('click', loadTransactions);
+searchTransactionsInput.addEventListener('input', loadTransactions);
+
+addTransactionButton.addEventListener('click', addTransaction);
+
+// Експортуємо функції для доступу з HTML (onclick)
+window.toggleNoteCompletion = toggleNoteCompletion;
+window.deleteNote = deleteNote;
+window.toggleTaskCompletion = toggleTaskCompletion;
+window.deleteTask = deleteTask;
+window.editTransaction = editTransaction;
+window.deleteTransaction = deleteTransaction;
