@@ -12,7 +12,7 @@
     <div class="container">
         <header class="navbar glassmorphism">
             <div class="logo">
-                <img src="path/to/your/logo.svg" alt="Логотип" class="logo-icon"> Облік Коштів | Наш Бюджет
+                <img src="https://api.iconify.design/solar:notebook-broken.svg?color=%23e0e0e0" alt="Логотип" class="logo-icon"> Облік Коштів | Наш Бюджет
             </div>
             <nav>
                 <a href="#" class="nav-item">Доходи</a>
@@ -21,7 +21,7 @@
                 <a href="#" class="nav-item">Налаштування</a>
             </nav>
             <div class="auth-section">
-                <button id="authButton" class="btn btn-primary">Увійти / Зареєструватись</button>
+                <button id="authButton" class="btn btn-primary">Увійти</button> <!-- Змінено текст -->
                 <button id="logoutButton" class="btn btn-secondary" style="display: none;">Вийти</button>
             </div>
         </header>
@@ -68,7 +68,7 @@
                     <h2>Нотатки</h2>
                     <div class="add-note-form">
                         <input type="text" id="newNoteInput" placeholder="Додати нову нотатку..." class="glassmorphism-input">
-                        <button id="addNoteButton" class="btn btn-icon"><img src="path/to/add-icon.svg" alt="Додати"></button>
+                        <button id="addNoteButton" class="btn btn-icon"><img src="https://api.iconify.design/ic:round-add.svg?color=%23e0e0e0" alt="Додати"></button>
                     </div>
                     <ul id="notesList" class="list-unstyled">
                         <!-- Нотатки будуть тут -->
@@ -80,7 +80,7 @@
                     <h2>Завдання/Таски</h2>
                     <div class="add-task-form">
                         <input type="text" id="newTaskInput" placeholder="Додати нове завдання..." class="glassmorphism-input">
-                        <button id="addTaskButton" class="btn btn-icon"><img src="path/to/add-icon.svg" alt="Додати"></button>
+                        <button id="addTaskButton" class="btn btn-icon"><img src="https://api.iconify.design/ic:round-add.svg?color=%23e0e0e0" alt="Додати"></button>
                     </div>
                     <ul id="tasksList" class="list-unstyled">
                         <!-- Завдання будуть тут -->
@@ -140,11 +140,11 @@
         <div id="authModal" class="modal">
             <div class="modal-content glassmorphism">
                 <span class="close-button">&times;</span>
-                <h2>Увійти / Зареєструватись</h2>
+                <h2>Увійти</h2> <!-- Змінено заголовок -->
                 <input type="email" id="authEmail" placeholder="Email" class="glassmorphism-input">
                 <input type="password" id="authPassword" placeholder="Пароль" class="glassmorphism-input">
                 <button id="signInButton" class="btn btn-primary">Увійти</button>
-                <button id="signUpButton" class="btn btn-secondary">Зареєструватись</button>
+                <!-- Кнопка "Зареєструватись" видалена -->
                 <p id="authMessage" style="color: red;"></p>
             </div>
         </div>
