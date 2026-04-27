@@ -111,49 +111,13 @@ async function signIn() {
         return;
     }
 
-    // --- Тут потрібна функція Supabase RPC для перевірки пароля ---
-    // Ми не можемо прямо читати password_hash з `user_profiles` на клієнті через RLS.
-    // Тому потрібно створити функцію в PostgreSQL (Supabase Dashboard -> Database -> Functions),
-    // яка приймає login і password, перевіряє їх і повертає user_id або помилку.
-
-    // ПРИКЛАД RPC ФУНКЦІЇ (ВИ ПОВИННІ СТВОРИТИ ЇЇ В SUPABASE)
-    // CREATE OR REPLACE FUNCTION verify_user_login(p_login TEXT, p_password TEXT)
-    // RETURNS UUID
-    // LANGUAGE plpgsql
-    // SECURITY DEFINER
-    // AS $$
-    // DECLARE
-    //   found_user_id UUID;
-    //   stored_hash TEXT;
-    // BEGIN
-    //   SELECT id, password_hash INTO found_user_id, stored_hash
-    //   FROM public.user_profiles
-    //   WHERE login = p_login;
-    //
-    //   IF NOT FOUND THEN
-    //     RETURN NULL; -- Користувача не знайдено
-    //   END IF;
-    //
-    //   -- В реальності тут потрібно використовувати pgcrypto extension для порівняння хешів
-    //   -- SELECT crypt(p_password, stored_hash) = stored_hash
-    //   -- Для цього прикладу, спростимо (НЕБЕЗПЕЧНО для продакшн)
-    //   IF p_password = stored_hash THEN -- ПОРІВНЯННЯ ВІДКРИТИХ ПАРОЛІВ - ДЛЯ ДЕМО!
-    //     RETURN found_user_id;
-    //   ELSE
-    //     RETURN NULL; -- Неправильний пароль
-    //   END IF;
-    // END;
-    // $$;
-    //
-    // Після створення функції, ви також повинні надати їй EXECUTE право для ролі `anon`
-    // (АБО ВИКОРИСТОВУВАТИ Service Role Key, що також НЕБЕЗПЕЧНО для клієнта).
-
+    // Змінено: деструктуризуємо повернуті дані одразу в userId
     const { data: userId, error } = await sb.rpc('verify_user_login', { p_login: login, p_password: password });
 
-    if (error || !data) {
+    if (error || !userId) { // Використовуємо userId замість data
         authMessage.textContent = error?.message || 'Неправильний логін або пароль.';
     } else {
-        const userId = data; // Якщо функція повертає UUID
+        // userId вже є UUID, отриманим від RPC
         await setSessionUserId(userId);
         authMessage.textContent = '';
         authEmail.value = '';
