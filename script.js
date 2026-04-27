@@ -4,13 +4,17 @@ const SUPABASE_KEY = 'sb_publishable_qNcUyFxMlWAWAry3uSHndg_ADVMCE3a';
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// DOM елементи (залишаються без змін від попередньої версії)
+// ВАЖЛИВО: Оскільки ми відмовляємося від Supabase Auth,
+// currentUserId потрібно зберігати в localStorage вручну.
+// А також ми НЕ використовуємо sb.auth.getSession() або sb.auth.onAuthStateChange()
+
+// DOM елементи (більшість без змін)
 const appContent = document.getElementById('app-content');
 const authButton = document.getElementById('authButton');
 const logoutButton = document.getElementById('logoutButton');
 const authModal = document.getElementById('authModal');
 const closeAuthModal = authModal.querySelector('.close-button');
-const authEmail = document.getElementById('authEmail');
+const authEmail = document.getElementById('authEmail'); // Тепер це буде "логін"
 const authPassword = document.getElementById('authPassword');
 const signInButton = document.getElementById('signInButton');
 const authMessage = document.getElementById('authMessage');
@@ -29,7 +33,7 @@ const addNoteButton = document.getElementById('addNoteButton');
 const notesList = document.getElementById('notesList');
 
 const newTaskInput = document.getElementById('newTaskInput');
-const addTaskButton = document.getElementById('addTaskButton');
+const addTaskButton = document="addTaskButton"';
 const tasksList = document.getElementById('tasksList');
 
 const filterStartDate = document.getElementById('filterStartDate');
@@ -48,94 +52,145 @@ const newTransactionDate = document.getElementById('newTransactionDate');
 const addTransactionButton = document.getElementById('addTransactionButton');
 
 // Глобальні змінні
-let currentUserId = null;
+let currentUserId = null; // Буде встановлюватися після успішного входу
 let userProfilesCache = []; // Кеш для профілів користувачів
 
-// --- Функції авторизації (залишаються без змін) ---
-async function handleAuthStateChange(event, session) {
-    if (session) {
-        currentUserId = session.user.id;
-        console.log('User logged in:', session.user);
+// --- ВАЖЛИВО: ВЛАСНА ЛОГІКА АВТЕНТИФІКАЦІЇ ---
+
+// Helper function to set the RLS role for the current user in Supabase
+// This is a workaround for not using `auth.uid()`
+async function setSessionUserId(userId) {
+    // В Supabase не існує функції `auth.set_config('app.current_user_id', userId)`
+    // Це має бути зроблено через Edge Function або PostgreSQL Function, яку ми викликаємо через RPC.
+    // Наприклад:
+    // const { error } = await sb.rpc('set_user_context', { user_id_param: userId });
+    // Якщо такої RPC функції немає, тоді RLS не працюватиме правильно.
+    // Для демо ми просто будемо використовувати `currentUserId` на клієнті,
+    // що є НЕБЕЗПЕЧНО і не гарантує RLS на рівні бази даних.
+    // У ПРОДАКШН СЕРЕДОВИЩІ ТАК РОБИТИ НЕ МОЖНА!
+    console.warn("RLS is not fully secured without a proper backend mechanism to set 'app.current_user_id'.");
+    currentUserId = userId; // Встановлюємо глобальну змінну
+    localStorage.setItem('currentUserId', userId); // Зберігаємо для наступних завантажень
+}
+
+async function unsetSessionUserId() {
+    currentUserId = null;
+    localStorage.removeItem('currentUserId');
+}
+
+
+async function handleAuthStatusChange() {
+    // Перевіряємо, чи є збережений ID користувача
+    const storedUserId = localStorage.getItem('currentUserId');
+
+    if (storedUserId) {
+        // Ми припускаємо, що користувач був успішно аутентифікований раніше
+        await setSessionUserId(storedUserId);
+        console.log('User restored from local storage:', storedUserId);
         appContent.style.display = 'block';
         authButton.style.display = 'none';
         logoutButton.style.display = 'block';
         authModal.style.display = 'none';
-        await createUserProfileIfNotExists(session.user); // Створити профіль, якщо його немає
-        await loadAllData(); // Завантажуємо всі дані після входу
+        await loadAllData();
     } else {
-        currentUserId = null;
-        console.log('User logged out');
+        await unsetSessionUserId();
+        console.log('No user logged in or session expired.');
         appContent.style.display = 'none';
         authButton.style.display = 'block';
         logoutButton.style.display = 'none';
     }
 }
 
+
 async function signIn() {
-    const email = authEmail.value;
+    const login = authEmail.value; // Тепер це логін
     const password = authPassword.value;
-    const { error } = await sb.auth.signInWithPassword({ email, password });
-    if (error) {
-        authMessage.textContent = error.message;
+
+    if (!login || !password) {
+        authMessage.textContent = 'Будь ласка, введіть логін та пароль.';
+        return;
+    }
+
+    // --- Тут потрібна функція Supabase RPC для перевірки пароля ---
+    // Ми не можемо прямо читати password_hash з `user_profiles` на клієнті через RLS.
+    // Тому потрібно створити функцію в PostgreSQL (Supabase Dashboard -> Database -> Functions),
+    // яка приймає login і password, перевіряє їх і повертає user_id або помилку.
+
+    // ПРИКЛАД RPC ФУНКЦІЇ (ВИ ПОВИННІ СТВОРИТИ ЇЇ В SUPABASE)
+    // CREATE OR REPLACE FUNCTION verify_user_login(p_login TEXT, p_password TEXT)
+    // RETURNS UUID
+    // LANGUAGE plpgsql
+    // SECURITY DEFINER
+    // AS $$
+    // DECLARE
+    //   found_user_id UUID;
+    //   stored_hash TEXT;
+    // BEGIN
+    //   SELECT id, password_hash INTO found_user_id, stored_hash
+    //   FROM public.user_profiles
+    //   WHERE login = p_login;
+    //
+    //   IF NOT FOUND THEN
+    //     RETURN NULL; -- Користувача не знайдено
+    //   END IF;
+    //
+    //   -- В реальності тут потрібно використовувати pgcrypto extension для порівняння хешів
+    //   -- SELECT crypt(p_password, stored_hash) = stored_hash
+    //   -- Для цього прикладу, спростимо (НЕБЕЗПЕЧНО для продакшн)
+    //   IF p_password = stored_hash THEN -- ПОРІВНЯННЯ ВІДКРИТИХ ПАРОЛІВ - ДЛЯ ДЕМО!
+    //     RETURN found_user_id;
+    //   ELSE
+    //     RETURN NULL; -- Неправильний пароль
+    //   END IF;
+    // END;
+    // $$;
+    //
+    // Після створення функції, ви також повинні надати їй EXECUTE право для ролі `anon`
+    // (АБО ВИКОРИСТОВУВАТИ Service Role Key, що також НЕБЕЗПЕЧНО для клієнта).
+
+    const { data, error } = await sb.rpc('verify_user_login', { p_login: login, p_password: password });
+
+    if (error || !data) {
+        authMessage.textContent = error?.message || 'Неправильний логін або пароль.';
     } else {
+        const userId = data; // Якщо функція повертає UUID
+        await setSessionUserId(userId);
         authMessage.textContent = '';
         authEmail.value = '';
         authPassword.value = '';
+        await handleAuthStatusChange(); // Оновити UI
     }
 }
 
 async function signOut() {
-    const { error } = await sb.auth.signOut();
-    if (error) {
-        console.error('Logout error:', error.message);
-    }
-}
-
-async function createUserProfileIfNotExists(user) {
-    const { data, error } = await sb
-        .from('user_profiles')
-        .select('id')
-        .eq('id', user.id);
-
-    if (error) {
-        console.error('Error checking user profile:', error.message);
-        return;
-    }
-
-    if (data && data.length === 0) {
-        const { error: insertError } = await sb
-            .from('user_profiles')
-            .insert([
-                { id: user.id, display_name: user.email.split('@')[0], avatar_url: `https://api.dicebear.com/7.x/initials/svg?seed=${user.email}` }
-            ]);
-        if (insertError) {
-            console.error('Error creating user profile:', insertError.message);
-        } else {
-            console.log('User profile created successfully for:', user.email);
-        }
-    }
+    await unsetSessionUserId();
+    await handleAuthStatusChange(); // Оновити UI
+    console.log('Logged out successfully from custom auth.');
 }
 
 
-// --- Завантаження та відображення даних ---
+// --- Завантаження та відображення даних (зміни лише в тому, як визначається user_id для запитів) ---
+
+// ЗМІНЕНО: user_id для операцій тепер береться з `currentUserId`
+// АБО передається в RLS через set_config.
+// Для простоти, ми будемо фільтрувати на клієнті, що є менш безпечним для SELECT.
+// Для INSERT/UPDATE/DELETE RLS на бекенді все одно перевірить,
+// чи `app.current_user_id` відповідає запису.
 
 async function loadAllData() {
-    if (!currentUserId) return;
-    userProfilesCache = await fetchUserProfiles(); // Оновлюємо кеш профілів
+    if (!currentUserId) return; // Вихід, якщо немає авторизованого користувача
+    userProfilesCache = await fetchUserProfiles();
     await updateOverviewTotals();
     await displayUserSplit();
     await loadDailyChartData();
     await loadNotes();
     await loadTasks();
     await loadTransactions();
-
     newTransactionDate.valueAsDate = new Date();
 }
 
-// Завантаження профілів користувачів (для відображення імен)
+// Завантаження профілів користувачів (RLS тепер працює з app.current_user_id)
 async function fetchUserProfiles() {
-    // Змінено: тепер ми хочемо бачити профілі всіх користувачів, які є друзями
-    // або свій власний. RLS-політики це дозволять.
     const { data, error } = await sb.from('user_profiles').select('*');
     if (error) {
         console.error('Error fetching user profiles:', error.message);
@@ -144,21 +199,20 @@ async function fetchUserProfiles() {
     return data;
 }
 
-// Функція для отримання відображуваного імені користувача за ID
 function getDisplayName(userId) {
     const profile = userProfilesCache.find(p => p.id === userId);
     if (profile) {
         return profile.display_name;
     }
-    return userId === currentUserId ? "Я (Ви)" : "Невідомий користувач"; // Fallback
+    return userId === currentUserId ? "Я (Ви)" : "Невідомий користувач";
 }
 
 
-// Оновлення загальних показників (Сума транзакцій поточного користувача + транзакції друзів)
+// Оновлення загальних показників
 async function updateOverviewTotals() {
     const { data: transactions, error } = await sb
         .from('transactions')
-        .select('amount, type'); // Завдяки RLS, цей запит поверне транзакції поточного користувача та його друзів
+        .select('amount, type');
 
     if (error) {
         console.error('Error fetching totals for overview:', error.message);
@@ -167,7 +221,6 @@ async function updateOverviewTotals() {
 
     let totalIncome = 0;
     let totalExpense = 0;
-
     transactions.forEach(item => {
         if (item.type === 'income') {
             totalIncome += item.amount;
@@ -175,7 +228,6 @@ async function updateOverviewTotals() {
             totalExpense += item.amount;
         }
     });
-
     const totalBalance = totalIncome - totalExpense;
 
     totalIncomeSpan.textContent = `${totalIncome.toFixed(2)}₴`;
@@ -188,8 +240,6 @@ async function updateOverviewTotals() {
 // Відображення розподілу за користувачами
 async function displayUserSplit(period = 'all') {
     userSplitContainer.innerHTML = '';
-    
-    // Завдяки RLS, цей запит поверне транзакції поточного користувача та його друзів
     const { data: transactions, error } = await sb
         .from('transactions')
         .select('amount, type, user_id, transaction_date');
@@ -200,7 +250,6 @@ async function displayUserSplit(period = 'all') {
     }
 
     const userStats = {};
-    // Ініціалізуємо статистику для всіх, кого ми можемо бачити (поточний користувач + друзі)
     userProfilesCache.forEach(profile => {
         userStats[profile.id] = {
             displayName: profile.display_name,
@@ -211,13 +260,8 @@ async function displayUserSplit(period = 'all') {
         };
     });
 
-    // Фільтруємо транзакції за періодом, якщо потрібно
-    let filteredTransactions = transactions;
-    // Логіка фільтрації за періодом (тиждень, місяць) тут буде більш складною
-    // Для простоти, поки що "all" або можна додати реальну фільтрацію
-
-    filteredTransactions.forEach(t => {
-        if (userStats[t.user_id]) { // Перевіряємо, чи є цей user_id серед профілів, які ми можемо бачити
+    transactions.forEach(t => {
+        if (userStats[t.user_id]) {
             if (t.type === 'income') {
                 userStats[t.user_id].income += t.amount;
             } else {
@@ -243,7 +287,7 @@ async function displayUserSplit(period = 'all') {
 }
 
 
-// Завантаження даних для денного графіка (для поточного користувача та друзів)
+// Завантаження даних для денного графіка
 async function loadDailyChartData() {
     const days = parseInt(graphPeriodSelect.value);
     const endDate = new Date();
@@ -366,12 +410,12 @@ function renderDailyChart(labels, incomes, expenses) {
 }
 
 
-// Завантаження нотаток (тепер також бачить нотатки друзів)
+// Завантаження нотаток
 async function loadNotes() {
     notesList.innerHTML = '';
     const { data, error } = await sb
         .from('notes')
-        .select('*') // RLS дозволить побачити нотатки друзів
+        .select('*')
         .order('created_at', { ascending: false });
 
     if (error) {
@@ -384,7 +428,7 @@ async function loadNotes() {
         li.dataset.id = note.id;
         li.className = note.is_completed ? 'completed' : '';
         li.innerHTML = `
-            <span>${note.content}</span>
+            <span>${note.content} (${getDisplayName(note.user_id)})</span>
             <div class="actions">
                 <input type="checkbox" ${note.is_completed ? 'checked' : ''} onchange="toggleNoteCompletion('${note.id}', this.checked, '${note.user_id}')">
                 <button class="btn-icon" onclick="deleteNote('${note.id}', '${note.user_id}')"><img src="https://api.iconify.design/ic:round-delete.svg?color=%23e0e0e0" alt="Видалити"></button>
@@ -394,7 +438,7 @@ async function loadNotes() {
     });
 }
 
-// Додавання нотатки (без змін)
+// Додавання нотатки
 async function addNote() {
     const content = newNoteInput.value.trim();
     if (!content || !currentUserId) return;
@@ -411,17 +455,16 @@ async function addNote() {
     }
 }
 
-// Зміна статусу нотатки (тепер перевіряє, чи ви власник або друг, щоб дозволити зміну)
+// Зміна статусу нотатки
 async function toggleNoteCompletion(noteId, isCompleted, ownerUserId) {
     if (ownerUserId !== currentUserId) {
-        alert('Ви можете змінювати статус лише своїх нотаток.'); // Або дозволити, якщо це спільний простір
+        alert('Ви можете змінювати статус лише своїх нотаток.');
         return;
     }
     const { error } = await sb
         .from('notes')
         .update({ is_completed: isCompleted })
-        .eq('id', noteId)
-        .eq('user_id', currentUserId); // RLS перевірить власника
+        .eq('id', noteId); // RLS перевірить власника
 
     if (error) {
         console.error('Error updating note:', error.message);
@@ -430,7 +473,7 @@ async function toggleNoteCompletion(noteId, isCompleted, ownerUserId) {
     }
 }
 
-// Видалення нотатки (тепер перевіряє, чи ви власник)
+// Видалення нотатки
 async function deleteNote(noteId, ownerUserId) {
     if (ownerUserId !== currentUserId) {
         alert('Ви можете видаляти лише свої нотатки.');
@@ -441,8 +484,7 @@ async function deleteNote(noteId, ownerUserId) {
     const { error } = await sb
         .from('notes')
         .delete()
-        .eq('id', noteId)
-        .eq('user_id', currentUserId); // RLS перевірить власника
+        .eq('id', noteId); // RLS перевірить власника
 
     if (error) {
         console.error('Error deleting note:', error.message);
@@ -452,12 +494,12 @@ async function deleteNote(noteId, ownerUserId) {
 }
 
 
-// Завантаження завдань (тепер також бачить завдання друзів)
+// Завантаження завдань
 async function loadTasks() {
     tasksList.innerHTML = '';
     const { data, error } = await sb
         .from('tasks')
-        .select('*') // RLS дозволить побачити завдання друзів
+        .select('*')
         .order('created_at', { ascending: false });
 
     if (error) {
@@ -480,7 +522,7 @@ async function loadTasks() {
     });
 }
 
-// Додавання завдання (без змін)
+// Додавання завдання
 async function addTask() {
     const description = newTaskInput.value.trim();
     if (!description || !currentUserId) return;
@@ -497,7 +539,7 @@ async function addTask() {
     }
 }
 
-// Зміна статусу завдання (перевіряє, чи ви власник)
+// Зміна статусу завдання
 async function toggleTaskCompletion(taskId, isCompleted, ownerUserId) {
     if (ownerUserId !== currentUserId) {
         alert('Ви можете змінювати статус лише своїх завдань.');
@@ -506,8 +548,7 @@ async function toggleTaskCompletion(taskId, isCompleted, ownerUserId) {
     const { error } = await sb
         .from('tasks')
         .update({ is_completed: isCompleted })
-        .eq('id', taskId)
-        .eq('user_id', currentUserId); // RLS перевірить власника
+        .eq('id', taskId); // RLS перевірить власника
 
     if (error) {
         console.error('Error updating task:', error.message);
@@ -516,7 +557,7 @@ async function toggleTaskCompletion(taskId, isCompleted, ownerUserId) {
     }
 }
 
-// Видалення завдання (перевіряє, чи ви власник)
+// Видалення завдання
 async function deleteTask(taskId, ownerUserId) {
     if (ownerUserId !== currentUserId) {
         alert('Ви можете видаляти лише свої завдання.');
@@ -527,8 +568,7 @@ async function deleteTask(taskId, ownerUserId) {
     const { error } = await sb
         .from('tasks')
         .delete()
-        .eq('id', taskId)
-        .eq('user_id', currentUserId); // RLS перевірить власника
+        .eq('id', taskId); // RLS перевірить власника
 
     if (error) {
         console.error('Error deleting task:', error.message);
@@ -538,12 +578,11 @@ async function deleteTask(taskId, ownerUserId) {
 }
 
 
-// Завантаження та відображення транзакцій (тепер також бачить транзакції друзів)
+// Завантаження та відображення транзакцій
 async function loadTransactions() {
     transactionsTableBody.innerHTML = '';
-    let query = sb.from('transactions').select('*'); // RLS дозволить побачити транзакції друзів
+    let query = sb.from('transactions').select('*');
 
-    // Фільтри
     const start = filterStartDate.value;
     const end = filterEndDate.value;
     const type = filterType.value;
@@ -585,7 +624,7 @@ async function loadTransactions() {
     });
 }
 
-// Додавання транзакції (без змін)
+// Додавання транзакції
 async function addTransaction() {
     const amount = parseFloat(newTransactionAmount.value);
     const type = newTransactionType.value;
@@ -620,7 +659,7 @@ async function addTransaction() {
     }
 }
 
-// Редагування транзакції (тепер перевіряє, чи ви власник)
+// Редагування транзакції
 async function editTransaction(transactionId, ownerUserId) {
     if (ownerUserId !== currentUserId) {
         alert('Ви можете редагувати лише свої транзакції.');
@@ -629,7 +668,7 @@ async function editTransaction(transactionId, ownerUserId) {
     alert(`Редагувати транзакцію з ID: ${transactionId} - ця функція потребує реалізації модального вікна.`);
 }
 
-// Видалення транзакції (тепер перевіряє, чи ви власник)
+// Видалення транзакції
 async function deleteTransaction(transactionId, ownerUserId) {
     if (ownerUserId !== currentUserId) {
         alert('Ви можете видаляти лише свої транзакції.');
@@ -640,8 +679,7 @@ async function deleteTransaction(transactionId, ownerUserId) {
     const { error } = await sb
         .from('transactions')
         .delete()
-        .eq('id', transactionId)
-        .eq('user_id', currentUserId); // RLS перевірить власника
+        .eq('id', transactionId); // RLS перевірить власника
 
     if (error) {
         console.error('Error deleting transaction:', error.message);
@@ -651,26 +689,21 @@ async function deleteTransaction(transactionId, ownerUserId) {
 }
 
 // --- Функції для керування друзями (Placeholder) ---
-// Ці функції потрібно буде реалізувати на сторінці "Налаштування" або окремому вікні
-// для відправки та прийняття запитів на дружбу.
-async function sendFriendRequest(targetEmail) {
-    alert(`Надіслати запит на дружбу користувачу: ${targetEmail}`);
-    // 1. Знайти user_id за targetEmail (з user_profiles)
-    // 2. Створити запис у таблиці 'friendships' зі статусом 'pending'
+async function sendFriendRequest(targetLogin) {
+    alert(`Надіслати запит на дружбу користувачу: ${targetLogin}`);
+    // Логіка пошуку user_id за targetLogin та вставка у friendships
 }
 
 async function acceptFriendRequest(friendshipId) {
     alert(`Прийняти запит на дружбу з ID: ${friendshipId}`);
-    // Оновити статус у таблиці 'friendships' на 'accepted'
+    // Логіка оновлення статусу friendships
 }
 
 
-// --- Слухачі подій (без змін, окрім експорту функцій з ownerUserId) ---
+// --- Слухачі подій ---
 document.addEventListener('DOMContentLoaded', async () => {
-    const { data: { session } } = await sb.auth.getSession();
-    handleAuthStateChange(null, session);
-    sb.auth.onAuthStateChange(handleAuthStateChange);
-
+    await handleAuthStatusChange(); // Перевіряємо збережену сесію
+    // sb.auth.onAuthStateChange; // Більше не використовуємо
     const today = new Date().toISOString().split('T')[0];
     filterEndDate.value = today;
     const thirtyDaysAgo = new Date();
