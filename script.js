@@ -13,7 +13,7 @@ const closeAuthModal = authModal.querySelector('.close-button');
 const authEmail = document.getElementById('authEmail');
 const authPassword = document.getElementById('authPassword');
 const signInButton = document.getElementById('signInButton');
-const signUpButton = document.getElementById('signUpButton');
+// const signUpButton = document.getElementById('signUpButton'); // Видаляємо
 const authMessage = document.getElementById('authMessage');
 
 const totalIncomeSpan = document.getElementById('totalIncome');
@@ -85,6 +85,8 @@ async function signIn() {
     }
 }
 
+// Видаляємо функцію signUp(), оскільки вона більше не потрібна
+/*
 async function signUp() {
     const email = authEmail.value;
     const password = authPassword.value;
@@ -98,6 +100,7 @@ async function signUp() {
         authPassword.value = '';
     }
 }
+*/
 
 async function signOut() {
     const { error } = await sb.auth.signOut();
@@ -316,7 +319,7 @@ function renderDailyChart(labels, incomes, expenses) {
                 {
                     label: 'Доходи',
                     data: incomes,
-                    borderColor: varToRgb('--success-green'),
+                    borderColor: getComputedStyle(document.body).getPropertyValue('--success-green'),
                     backgroundColor: 'rgba(105, 240, 174, 0.2)',
                     fill: false,
                     tension: 0.3
@@ -324,7 +327,7 @@ function renderDailyChart(labels, incomes, expenses) {
                 {
                     label: 'Витрати',
                     data: expenses,
-                    borderColor: varToRgb('--danger-red'),
+                    borderColor: getComputedStyle(document.body).getPropertyValue('--danger-red'),
                     backgroundColor: 'rgba(255, 138, 128, 0.2)',
                     fill: false,
                     tension: 0.3
@@ -337,7 +340,7 @@ function renderDailyChart(labels, incomes, expenses) {
             plugins: {
                 legend: {
                     labels: {
-                        color: varToRgb('--text-light')
+                        color: getComputedStyle(document.body).getPropertyValue('--text-light')
                     }
                 },
                 tooltip: {
@@ -358,29 +361,23 @@ function renderDailyChart(labels, incomes, expenses) {
             scales: {
                 x: {
                     ticks: {
-                        color: varToRgb('--text-secondary')
+                        color: getComputedStyle(document.body).getPropertyValue('--text-secondary')
                     },
                     grid: {
-                        color: varToRgb('--glass-border')
+                        color: getComputedStyle(document.body).getPropertyValue('--glass-border')
                     }
                 },
                 y: {
                     ticks: {
-                        color: varToRgb('--text-secondary')
+                        color: getComputedStyle(document.body).getPropertyValue('--text-secondary')
                     },
                     grid: {
-                        color: varToRgb('--glass-border')
+                        color: getComputedStyle(document.body).getPropertyValue('--glass-border')
                     }
                 }
             }
         }
     });
-}
-
-// Допоміжна функція для отримання CSS змінних в RGB форматі
-function varToRgb(variable) {
-    const style = getComputedStyle(document.body);
-    return style.getPropertyValue(variable);
 }
 
 
@@ -406,7 +403,7 @@ async function loadNotes() {
             <span>${note.content}</span>
             <div class="actions">
                 <input type="checkbox" ${note.is_completed ? 'checked' : ''} onchange="toggleNoteCompletion('${note.id}', this.checked)">
-                <button class="btn-icon" onclick="deleteNote('${note.id}')"><img src="path/to/delete-icon.svg" alt="Видалити"></button>
+                <button class="btn-icon" onclick="deleteNote('${note.id}')"><img src="https://api.iconify.design/ic:round-delete.svg?color=%23e0e0e0" alt="Видалити"></button>
             </div>
         `;
         notesList.appendChild(li);
@@ -483,7 +480,7 @@ async function loadTasks() {
             <span>${task.description}</span>
             <div class="actions">
                 <input type="checkbox" ${task.is_completed ? 'checked' : ''} onchange="toggleTaskCompletion('${task.id}', this.checked)">
-                <button class="btn-icon" onclick="deleteTask('${task.id}')"><img src="path/to/delete-icon.svg" alt="Видалити"></button>
+                <button class="btn-icon" onclick="deleteTask('${task.id}')"><img src="https://api.iconify.design/ic:round-delete.svg?color=%23e0e0e0" alt="Видалити"></button>
             </div>
         `;
         tasksList.appendChild(li);
@@ -583,124 +580,5 @@ async function loadTransactions() {
             <td class="${t.type === 'income' ? 'income-text' : 'expense-text'}">${t.amount.toFixed(2)}₴</td>
             <td>${userName}</td>
             <td>
-                <button class="btn-icon" onclick="editTransaction('${t.id}')"><img src="path/to/edit-icon.svg" alt="Редагувати"></button>
-                <button class="btn-icon" onclick="deleteTransaction('${t.id}')"><img src="path/to/delete-icon.svg" alt="Видалити"></button>
-            </td>
-        `;
-        transactionsTableBody.appendChild(tr);
-    });
-}
-
-// Додавання транзакції
-async function addTransaction() {
-    const amount = parseFloat(newTransactionAmount.value);
-    const type = newTransactionType.value;
-    const category = newTransactionCategory.value.trim();
-    const description = newTransactionDescription.value.trim();
-    const transaction_date = newTransactionDate.value;
-
-    if (isNaN(amount) || amount <= 0 || !type || !category || !transaction_date || !currentUserId) {
-        alert('Будь ласка, заповніть всі обов\'язкові поля для транзакції (сума, тип, категорія, дата).');
-        return;
-    }
-
-    const { error } = await sb
-        .from('transactions')
-        .insert([{
-            user_id: currentUserId,
-            amount,
-            type,
-            category,
-            description,
-            transaction_date
-        }]);
-
-    if (error) {
-        console.error('Error adding transaction:', error.message);
-    } else {
-        // Очистити форму та оновити дані
-        newTransactionAmount.value = '';
-        newTransactionCategory.value = '';
-        newTransactionDescription.value = '';
-        newTransactionDate.valueAsDate = new Date(); // Скинути на сьогодні
-        await loadAllData(); // Оновити всі блоки
-    }
-}
-
-// Редагування транзакції (потрібен модальний діалог або inline редагування)
-async function editTransaction(transactionId) {
-    alert(`Редагувати транзакцію з ID: ${transactionId} - ця функція потребує реалізації модального вікна.`);
-    // Тут потрібно буде відкрити модальне вікно з формою, заповненою даними транзакції,
-    // дозволити користувачу змінити їх і потім оновити в Supabase.
-}
-
-// Видалення транзакції
-async function deleteTransaction(transactionId) {
-    if (!confirm('Ви впевнені, що хочете видалити цю транзакцію?')) return;
-
-    const { error } = await sb
-        .from('transactions')
-        .delete()
-        .eq('id', transactionId)
-        .eq('user_id', currentUserId); // Перевірка user_id для RLS
-
-    if (error) {
-        console.error('Error deleting transaction:', error.message);
-    } else {
-        await loadAllData(); // Оновити всі блоки
-    }
-}
-
-
-// --- Слухачі подій ---
-document.addEventListener('DOMContentLoaded', async () => {
-    // Перевіряємо сесію при завантаженні сторінки
-    const { data: { session } } = await sb.auth.getSession();
-    handleAuthStateChange(null, session); // Ініціалізуємо стан UI
-
-    // Слухач для зміни стану авторизації (вхід/вихід)
-    sb.auth.onAuthStateChange(handleAuthStateChange);
-
-    // Встановлюємо сьогоднішню дату для фільтрів
-    const today = new Date().toISOString().split('T')[0];
-    filterEndDate.value = today;
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29); // Останні 30 днів
-    filterStartDate.value = thirtyDaysAgo.toISOString().split('T')[0];
-});
-
-authButton.addEventListener('click', () => {
-    authModal.style.display = 'flex';
-    authMessage.textContent = '';
-});
-closeAuthModal.addEventListener('click', () => authModal.style.display = 'none');
-window.addEventListener('click', (event) => {
-    if (event.target == authModal) {
-        authModal.style.display = 'none';
-    }
-});
-
-signInButton.addEventListener('click', signIn);
-signUpButton.addEventListener('click', signUp);
-logoutButton.addEventListener('click', signOut);
-
-addNoteButton.addEventListener('click', addNote);
-newNoteInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addNote(); });
-
-addTaskButton.addEventListener('click', addTask);
-newTaskInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addTask(); });
-
-graphPeriodSelect.addEventListener('change', loadDailyChartData);
-
-applyFiltersButton.addEventListener('click', loadTransactions);
-searchTransactionsInput.addEventListener('input', loadTransactions);
-
-addTransactionButton.addEventListener('click', addTransaction);
-
-// Експортуємо функції для доступу з HTML (onclick)
-window.toggleNoteCompletion = toggleNoteCompletion;
-window.deleteNote = deleteNote;
-window.toggleTaskCompletion = toggleTaskCompletion;
-window.deleteTask = deleteTask;
-window.editTransaction = editTransaction;
-window.deleteTransaction = deleteTransaction;
+                <button class="btn-icon" onclick="editTransaction('${t.id}')"><img src="https://api.iconify.design/ic:round-edit.svg?color=%23e0e0e0" alt="Редагувати"></button>
+                <button class="btn-icon" onclic
