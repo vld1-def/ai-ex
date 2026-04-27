@@ -33,7 +33,7 @@ const addNoteButton = document.getElementById('addNoteButton');
 const notesList = document.getElementById('notesList');
 
 const newTaskInput = document.getElementById('newTaskInput');
-const addTaskButton = document="addTaskButton"';
+const addTaskButton = document.getElementById('addTaskButton');
 const tasksList = document.getElementById('tasksList');
 
 const filterStartDate = document.getElementById('filterStartDate');
@@ -148,7 +148,7 @@ async function signIn() {
     // Після створення функції, ви також повинні надати їй EXECUTE право для ролі `anon`
     // (АБО ВИКОРИСТОВУВАТИ Service Role Key, що також НЕБЕЗПЕЧНО для клієнта).
 
-    const { data, error } = await sb.rpc('verify_user_login', { p_login: login, p_password: password });
+    const { data: userId, error } = await sb.rpc('verify_user_login', { p_login: login, p_password: password });
 
     if (error || !data) {
         authMessage.textContent = error?.message || 'Неправильний логін або пароль.';
