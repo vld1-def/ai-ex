@@ -1,1 +1,155 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Облік Коштів | Наш Бюджет</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header class="navbar glassmorphism">
+            <div class="logo">
+                <img src="path/to/your/logo.svg" alt="Логотип" class="logo-icon"> Облік Коштів | Наш Бюджет
+            </div>
+            <nav>
+                <a href="#" class="nav-item">Доходи</a>
+                <a href="#" class="nav-item">Витрати</a>
+                <a href="#" class="nav-item">Звіт</a>
+                <a href="#" class="nav-item">Налаштування</a>
+            </nav>
+            <div class="auth-section">
+                <button id="authButton" class="btn btn-primary">Увійти / Зареєструватись</button>
+                <button id="logoutButton" class="btn btn-secondary" style="display: none;">Вийти</button>
+            </div>
+        </header>
 
+        <main id="app-content" style="display: none;"> <!-- Приховано до авторизації -->
+            <!-- Блок "Огляд: Доходи та Витрати" -->
+            <section class="overview-section glassmorphism">
+                <div class="overview-item total-income">Загальний дохід: <span id="totalIncome">0.00₴</span></div>
+                <div class="overview-item total-expense">Загальні витрати: <span id="totalExpense">0.00₴</span></div>
+                <div class="overview-item total-balance">Загальний баланс: <span id="totalBalance">0.00₴</span></div>
+            </section>
+
+            <!-- Блок "Розподіл за Користувачами" -->
+            <section class="user-split-section glassmorphism">
+                <h2>Розподіл за Користувачами</h2>
+                <div class="user-split-controls">
+                    <button class="btn btn-sm active" data-period="all">За весь час</button>
+                    <button class="btn btn-sm" data-period="month">За місяць</button>
+                    <button class="btn btn-sm" data-period="week">За тиждень</button>
+                </div>
+                <div id="userSplitContainer" class="user-cards-wrapper">
+                    <!-- Картки користувачів будуть завантажені тут JS -->
+                </div>
+            </section>
+
+            <!-- Блок "Денний Графік: Доходи та Витрати" -->
+            <section class="daily-graph-section glassmorphism">
+                <h2>Денний Графік Доходів та Витрат</h2>
+                <div class="graph-controls">
+                    <select id="graphPeriodSelect" class="glassmorphism-input">
+                        <option value="7">Останні 7 днів</option>
+                        <option value="30" selected>Останні 30 днів</option>
+                        <option value="90">Останні 90 днів</option>
+                    </select>
+                </div>
+                <div class="chart-container">
+                    <canvas id="dailyChart"></canvas>
+                </div>
+            </section>
+
+            <div class="two-column-layout">
+                <!-- Блок "Нотатки" -->
+                <section class="notes-section glassmorphism">
+                    <h2>Нотатки</h2>
+                    <div class="add-note-form">
+                        <input type="text" id="newNoteInput" placeholder="Додати нову нотатку..." class="glassmorphism-input">
+                        <button id="addNoteButton" class="btn btn-icon"><img src="path/to/add-icon.svg" alt="Додати"></button>
+                    </div>
+                    <ul id="notesList" class="list-unstyled">
+                        <!-- Нотатки будуть тут -->
+                    </ul>
+                </section>
+
+                <!-- Блок "Завдання/Таски" -->
+                <section class="tasks-section glassmorphism">
+                    <h2>Завдання/Таски</h2>
+                    <div class="add-task-form">
+                        <input type="text" id="newTaskInput" placeholder="Додати нове завдання..." class="glassmorphism-input">
+                        <button id="addTaskButton" class="btn btn-icon"><img src="path/to/add-icon.svg" alt="Додати"></button>
+                    </div>
+                    <ul id="tasksList" class="list-unstyled">
+                        <!-- Завдання будуть тут -->
+                    </ul>
+                </section>
+            </div>
+
+            <!-- Блок "Список Транзакцій" -->
+            <section class="transactions-section glassmorphism">
+                <h2>Список Транзакцій</h2>
+                <div class="transaction-filters">
+                    <input type="date" id="filterStartDate" class="glassmorphism-input">
+                    <input type="date" id="filterEndDate" class="glassmorphism-input">
+                    <select id="filterType" class="glassmorphism-input">
+                        <option value="">Всі</option>
+                        <option value="income">Дохід</option>
+                        <option value="expense">Витрата</option>
+                    </select>
+                    <input type="text" id="filterCategory" placeholder="Категорія..." class="glassmorphism-input">
+                    <button id="applyFiltersButton" class="btn btn-primary">Застосувати</button>
+                    <input type="text" id="searchTransactions" placeholder="Пошук..." class="glassmorphism-input search-input">
+                </div>
+                <table class="transactions-table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Тип</th>
+                            <th>Категорія</th>
+                            <th>Опис</th>
+                            <th>Сума</th>
+                            <th>Користувач</th>
+                            <th>Дії</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transactionsTableBody">
+                        <!-- Транзакції будуть тут -->
+                    </tbody>
+                </table>
+                <div class="add-transaction-section">
+                    <h3>Додати нову транзакцію</h3>
+                    <div class="transaction-form-row">
+                        <input type="number" id="newTransactionAmount" placeholder="Сума" class="glassmorphism-input" step="0.01">
+                        <select id="newTransactionType" class="glassmorphism-input">
+                            <option value="income">Дохід</option>
+                            <option value="expense">Витрата</option>
+                        </select>
+                        <input type="text" id="newTransactionCategory" placeholder="Категорія" class="glassmorphism-input">
+                        <input type="text" id="newTransactionDescription" placeholder="Опис (необов'язково)" class="glassmorphism-input">
+                        <input type="date" id="newTransactionDate" class="glassmorphism-input">
+                        <button id="addTransactionButton" class="btn btn-primary">Додати Транзакцію</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Модальне вікно для авторизації -->
+        <div id="authModal" class="modal">
+            <div class="modal-content glassmorphism">
+                <span class="close-button">&times;</span>
+                <h2>Увійти / Зареєструватись</h2>
+                <input type="email" id="authEmail" placeholder="Email" class="glassmorphism-input">
+                <input type="password" id="authPassword" placeholder="Пароль" class="glassmorphism-input">
+                <button id="signInButton" class="btn btn-primary">Увійти</button>
+                <button id="signUpButton" class="btn btn-secondary">Зареєструватись</button>
+                <p id="authMessage" style="color: red;"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
